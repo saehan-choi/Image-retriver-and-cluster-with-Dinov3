@@ -142,8 +142,8 @@ def cluster_ng_images():
     # 클러스터링
     print("\n⭐ HDBSCAN 클러스터링 중...")
     clusterer = hdbscan.HDBSCAN(
-        min_cluster_size=100,  
-        min_samples=50,
+        min_cluster_size=150,
+        min_samples=100,
         metric="euclidean"
     )
     labels = clusterer.fit_predict(embs_np)
