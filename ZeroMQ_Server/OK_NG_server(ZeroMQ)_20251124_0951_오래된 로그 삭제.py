@@ -1,7 +1,11 @@
 import os, zmq, json, cv2, numpy as np, base64, datetime, traceback
 import torch
-from torch import nn
+
 import albumentations as A
+import logging
+from logging.handlers import RotatingFileHandler
+
+from torch import nn
 from albumentations.pytorch import ToTensorV2
 from concurrent.futures import ThreadPoolExecutor
 
@@ -30,6 +34,54 @@ def write_log(message: str):
     if DEBUG_MODE:
         print(line)
 
+    cleanup_logs(keep_last_n=2) # 최근 365개 파일만 남기고 다른건 삭제
+
+def cleanup_logs(keep_last_n=5):
+    """
+    LOG_DIR 안의 로그 파일 중 최신 N개만 남기고 오래된 파일 삭제
+    삭제 내용도 오늘 로그 파일에 안전하게 기록 (무한루프 없음)
+    """
+    if not os.path.exists(LOG_DIR):
+        return
+
+    log_files = sorted(
+        [os.path.join(LOG_DIR, f) for f in os.listdir(LOG_DIR) if f.endswith(".log")],
+        key=os.path.getmtime
+    )
+
+    if len(log_files) <= keep_last_n:
+        return
+
+    files_to_delete = log_files[:-keep_last_n]
+
+    # 오늘 로그 파일에 삭제 기록 남겨야 하니까 경로 준비
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    today_log_path = os.path.join(LOG_DIR, f"{today}.log")
+
+    for f in files_to_delete:
+        try:
+            os.remove(f)
+
+            # 🔥 write_log() 호출 금지 → 무한루프 막기
+            # 대신 직접 파일에 한 줄만 append
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            line = f"[{timestamp}] 🗑 오래된 로그 삭제: {os.path.basename(f)}\n"
+
+            with open(today_log_path, "a", encoding="utf-8") as logf:
+                logf.write(line)
+
+            if DEBUG_MODE:
+                print(line.strip())
+
+        except Exception as e:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            line = f"[{timestamp}] ❌ 로그 삭제 실패: {e}\n"
+
+            with open(today_log_path, "a", encoding="utf-8") as logf:
+                logf.write(line)
+
+            if DEBUG_MODE:
+                print(line.strip())
 
 # ==========================
 # 🧠 모델 설정
