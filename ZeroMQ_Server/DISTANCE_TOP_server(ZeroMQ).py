@@ -1,7 +1,4 @@
-import zmq
-import json
-import traceback
-import sys, os
+import sys
 import pickle
 import torch
 import io
@@ -57,7 +54,7 @@ class CFG:
     MODEL_NAME = "dinov3_vits16"
     n_layers = MODEL_TO_NUM_LAYERS[MODEL_NAME]
     IMAGE_SIZE = 768
-    plot_result = True
+    plot_result = True if DEBUG_MODE else False
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
 
@@ -144,7 +141,7 @@ def main():
 
                 # max_height_ratio -> 하나의 선만 감지되었을때 original 이미지의 몇퍼센트까지 도달하면 동일한 선상에 놓여있다고 판단할것인가
                 # -> 주의 해야함 오탐지가 될 수 있으니
-                result = infer_image_one(model, clf, device, use_fp16, image_np, file_name="", rotate_angle=rotate_angle, remove_ratio=remove_ratio, max_height_ratio=0.7, plot_result=CFG.plot_result)
+                result = infer_image_one(model, clf, device, use_fp16, image_np, rotate_angle=rotate_angle, plot_result=CFG.plot_result)
 
                 if isinstance(result, tuple):
                     socket.send_string(json.dumps({
@@ -172,9 +169,8 @@ def main():
 # ==========================
 # 🔹 이미지 폴더 추론 (직선 검출 포함)
 # ==========================
-def infer_image_one(model, clf, device, use_fp16, test_image: np.ndarray, file_name: str = "",
-                    rotate_angle: float = 1.3, remove_ratio: float = 0.15,
-                    max_height_ratio: float = 0.7, plot_result: bool = False):
+def infer_image_one(model, clf, device, use_fp16, test_image: np.ndarray,
+                    rotate_angle: float = 1.3, plot_result: bool = False):
 
     start_time = time.time()
 
@@ -307,6 +303,8 @@ def visualize_upper_lower(rotated, upper_vis, lower_vis, upper_x, lower_x, dx_te
 
     # lower 칸에 결과 덮기
     merged[h//2:, :] = lower_vis
+    import matplotlib
+    matplotlib.use("TkAgg")
 
     cv2.putText(merged, f"difference x = {dx_text}", (50, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -315,8 +313,7 @@ def visualize_upper_lower(rotated, upper_vis, lower_vis, upper_x, lower_x, dx_te
     plt.title(f"rotate={rotate_angle}")
     plt.imshow(merged)
     plt.axis("off")
-    plt.show()
-
+    plt.show(block=True)
 
 
 if __name__ == "__main__":
@@ -330,5 +327,3 @@ if __name__ == "__main__":
 #     rotate_angle = 1.3
 # };
 # socket.Send(JsonConvert.SerializeObject(req));
-
-
