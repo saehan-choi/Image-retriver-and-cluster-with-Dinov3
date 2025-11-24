@@ -37,6 +37,7 @@ class CFG:
 
     move_results_to_NG_folder = True
 
+    # centroid 적용된 것임
     search_NG = True # 이거 True로 하면 NG만 찾고, False로 하면 OK만 찾음 (True시 가장 anomaly detect 하고, False시 anomaly detect 한 score의 가장 낮은것들을 찾아냄)
 
 

@@ -5,7 +5,18 @@ import base64
 import re
 
 # 🔧 처리할 이미지 폴더
-folder_path = r"C:\4-2CAL_welder\dataset\Backup_현장\Backup_20251119\BOTTOM_20251118\BOTTOM_20251118012356_CSY2214(4)(0.69)_CSY6973(3)(0.80)"
+
+# 레이저선 명확 잘 됨. - TOP
+# folder_path = r"C:\4-2CAL_welder\dataset\Backup_현장\Backup_20251119\TOP_20251115\TOP_20251115003530_CSX7901(4)(1.62)_CSY4392(4)(1.62)"
+
+# 레이저선 명확 잘 됨. - TOP
+folder_path = r"C:\4-2CAL_welder\dataset\Backup_현장\Backup_20251119\TOP_20251115\TOP_20251115095347_CSY4906(2)(0.81)_CSY4567(4)(1.02)"
+
+# 레이저선 불명확 잘 안됨. - BOTTOM
+# folder_path = r"C:\4-2CAL_welder\dataset\Backup_현장\Backup_20251119\BOTTOM_20251118\BOTTOM_20251118061525_CSY3869(3)(1.95)_CSY5551(4)(1.63)"
+
+# 레이저선 명확 잘 됨. - BOTTOM
+# folder_path = r"C:\4-2CAL_welder\dataset\Backup_현장\Backup_20251119\BOTTOM_20251115\BOTTOM_20251115020848_CSY4934(4)(1.17)_CSY4938(4)(1.21)"
 
 # ZeroMQ 클라이언트 생성
 context = zmq.Context()

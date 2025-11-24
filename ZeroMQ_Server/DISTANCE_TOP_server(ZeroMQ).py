@@ -169,7 +169,7 @@ def main():
 # ==========================
 # 🔹 이미지 폴더 추론 (직선 검출 포함)
 # ==========================
-def infer_image_one(model, clf, device, use_fp16, test_image: np.ndarray,
+def infer_image_one(model, clf, device, use_fp16, test_image,
                     rotate_angle: float = 1.3, plot_result: bool = False):
 
     start_time = time.time()
