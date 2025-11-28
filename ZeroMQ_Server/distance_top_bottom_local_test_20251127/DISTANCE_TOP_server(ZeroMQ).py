@@ -14,7 +14,7 @@ from PIL import Image
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 LOG_DIR = "logs"
 PORT = 55552
 
@@ -32,7 +32,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ==========================
 class CFG:
     folder_path = "D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3"
-    model_path = "D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3/ibakoreaSystem/segmentation/laser_segmentation/weights/polygon_classifier_20251127.pkl"
+    model_path = "D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3/ibakoreaSystem/segmentation/laser_segmentation/weights/polygon_classifier_20251124.pkl"
     test_dir = rf"C:/Users/레노버/Downloads/Backup_현장/Backup_20250716/TOP_20250716142904" # 단차 차이 좀 나는거
 
     # 전처리 (중간 부분 제거)
@@ -108,18 +108,6 @@ def model_load():
 
     return model, clf, CFG.device, use_fp16
 
-# 명암 구분해서 밝은곳 더 밝게 어두운 곳 더 어둡게
-def s_curve(img, strength=0.5):
-    """
-    strength = 0.0 ~ 1.0 (0.5 추천)
-    S-curve: 밝은곳↑ 어두운곳↓
-    """
-    img = img.astype(np.float32) / 255.0
-
-    # S-curve
-    out = img + strength * (img - img**2)  # S 커브
-    out = np.clip(out * 255, 0, 255).astype(np.uint8)
-    return out
 
 
 def main():
@@ -132,36 +120,32 @@ def main():
 
     while True:
         try:
-            # 🔥 1) 멀티프레임 수신
-            frames = socket.recv_multipart()
+            msg = socket.recv_string()
+            req = json.loads(msg)
 
-            # [Frame 1] = file name (string)
-            file_name = frames[0].decode()
+            cmd = req.get("cmd", "")
+            rotate_angle = float(req.get("rotate_angle", 1.3))
+            remove_ratio = float(req.get("remove_ratio", 0.15))
 
-            # [Frame 2] = image binary
-            img_bytes = frames[1]
+            print(f"📩 요청 수신: rotate={rotate_angle}") # 일단 1.3으로 고정
 
-            print(f"📩 요청 수신: file={file_name}")
+            img_b64 = req.get("image_list", None)
+            if img_b64 is None:
+                raise ValueError("image_list가 없습니다.")
 
-            # 🔥 2) 이미지 디코딩
-            np_arr = np.frombuffer(img_bytes, dtype=np.uint8)
-            image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if len(img_b64) == 1:
+                img_b64 = img_b64[0]
+            else:
+                raise ValueError("이미지 batch_size가 1이 아닙니다.")
 
-            # # 🔥 2.5) 이미지 S curve -> 해도 효과 미미함
-            # image_np = s_curve(image_np, strength=0.6)
-
+            image_np = decode_base64_image(img_b64)
             if image_np is None:
                 raise ValueError("이미지 디코딩 실패")
 
-            # 🔥 3) 추론 수행
-            result = infer_image_one(
-                model, clf, device, use_fp16,
-                image_np,
-                rotate_angle=1.3,
-                plot_result=CFG.plot_result
-            )
+            # max_height_ratio -> 하나의 선만 감지되었을때 original 이미지의 몇퍼센트까지 도달하면 동일한 선상에 놓여있다고 판단할것인가
+            # -> 주의 해야함 오탐지가 될 수 있으니
+            result = infer_image_one(model, clf, device, use_fp16, image_np, rotate_angle=rotate_angle, plot_result=CFG.plot_result)
 
-            # 🔥 4) 결과 전송(JSON만 유지)
             if isinstance(result, tuple):
                 socket.send_string(json.dumps({
                     "status": "검출 완료",
@@ -169,11 +153,15 @@ def main():
                     "lower_x": round(result[1])
                 }))
             else:
+                # 검출 실패시 -1, -1을 전송함
                 socket.send_string(json.dumps({
                     "status": "검출 실패",
-                    "upper_x": -1,
-                    "lower_x": -1
+                    "upper_x": result[0],
+                    "lower_x": result[1]
                 }))
+
+            # else:
+            #     socket.send_string(json.dumps({"status": "ERROR", "msg": "unknown command"}))
 
         except Exception as e:
             err_msg = f"{type(e).__name__}: {str(e)}"
@@ -210,7 +198,7 @@ def infer_image_one(model, clf, device, use_fp16, test_image,
 
     # --- Δx 계산 ---
     if upper_x < 0 or lower_x < 0:
-        print("❌ 레이저 검출 실패 \n")
+        print("❌ 레이저 검출 실패")
         return (-1, -1)
 
     dx = lower_x - upper_x
@@ -225,12 +213,10 @@ def infer_image_one(model, clf, device, use_fp16, test_image,
 
     return (upper_x, lower_x)
 
-def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
+def detect_single_laser(model, clf, device, use_fp16, img_np):
     """
     입력: 상단 or 하단 이미지
     출력: (x좌표, 시각화 된 이미지)
-
-    min_height -> 높이가 80px 보다 작을경우 레이저 선이 아닌것으로 간주함 -> BOTTOM은 높이가 작은것도 은근 많네요
     """
 
     h, w = img_np.shape[:2]
@@ -293,11 +279,6 @@ def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
     x0, y0, w0, h0 = stats[best_label, cv2.CC_STAT_LEFT], stats[best_label, cv2.CC_STAT_TOP], \
                      stats[best_label, cv2.CC_STAT_WIDTH], stats[best_label, cv2.CC_STAT_HEIGHT]
 
-    if h0 < min_height:
-        # 이게 짧으면 오탐이 뜨고, 길면 실제 탐지되야 할 것 도 안됨.
-        print(f'탐지된 박스의 높이가 최소 높이보다 작은 상태입니다. 예측 높이: {h0} / 최소 높이: {min_height}')
-        return -1, img_np
-
     cv2.rectangle(vis, (x0, y0), (x0 + w0, y0 + h0), (0, 255, 255), 2)
     cv2.line(vis, (int(cx), y0), (int(cx), y0 + h0), (0, 0, 255), 2)
     cv2.circle(vis, (int(cx), int(cy)), 5, (0, 0, 255), -1)
@@ -340,3 +321,12 @@ def visualize_upper_lower(rotated, upper_vis, lower_vis, upper_x, lower_x, dx_te
 
 if __name__ == "__main__":
     main()
+
+
+# 이런식으로 추론 요청해야함 infer 로
+# var req = new {
+#     cmd = "infer",  // 👉 "추론을 해달라"는 명령 -> 나중에 infer_top_laser, infer_bottom_laser로 확장가능
+#     image_data = Convert.ToBase64String(File.ReadAllBytes(imagePath)),
+#     rotate_angle = 1.3
+# };
+# socket.Send(JsonConvert.SerializeObject(req));

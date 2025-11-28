@@ -88,10 +88,10 @@ def cleanup_logs(keep_last_n=5):
 # ==========================
 class CFG:
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    dinov3_location = "C:/dinov3/"
+    dinov3_location = rf"D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3/"
     model_name = "dinov3_vits16"
-    dinov3_weights_path = "C:/dinov3/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
-    weights_path = rf"C:\dinov3\ibakoreaSystem\classification\weights\DINOv3_linear_best_epoch50.pth"
+    dinov3_weights_path = rf"D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
+    weights_path = rf"D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3\ibakoreaSystem\classification\weights\DINOv3_linear_best_epoch50.pth"
     in_features = 384
     model_num_class = 2
     batch_size = 8   # ✅ 기본 배치 크기 (C#에서 덮어쓸 수도 있음)
