@@ -2,8 +2,6 @@ import os, zmq, json, cv2, numpy as np, base64, datetime, traceback
 import torch
 
 import albumentations as A
-import logging
-from logging.handlers import RotatingFileHandler
 
 from torch import nn
 from albumentations.pytorch import ToTensorV2

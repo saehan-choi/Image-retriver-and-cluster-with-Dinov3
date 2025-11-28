@@ -43,18 +43,15 @@ class CFG:
     IMAGENET_STD = (0.229, 0.224, 0.225)
     WEIGHTS_PATH = "D:\iba\POSCO_welding(2025.09.30~2025.12.30)\dinov3/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
 
-    MODEL_TO_NUM_LAYERS = {
-        "dinov3_vits16": 12,
-        "dinov3_vits16plus": 12,
-        "dinov3_vitb16": 12,
-        "dinov3_vitl16": 24,
-        "dinov3_vith16plus": 32,
-        "dinov3_vit7b16": 40,
-    }
+    MODEL_TO_NUM_LAYERS = {"dinov3_vits16": 12, "dinov3_vits16plus": 12, "dinov3_vitb16": 12, "dinov3_vitl16": 24, "dinov3_vith16plus": 32, "dinov3_vit7b16": 40}
     MODEL_NAME = "dinov3_vits16"
     n_layers = MODEL_TO_NUM_LAYERS[MODEL_NAME]
     IMAGE_SIZE = 768
+    min_height = 60 # TOP 에서는 80이 맞고, BOTTOM에서는 width 를 조절하는게 나을거 같음
+    confidence = 0.7 # activation이 해당값 이상일때만 탐지 중
+    rotate_angle = 4  # TOP은 1.3도 가 제일 적절하고 , BOTTOM은 4도 width가 너무 작으면 ㅇㅇ 안하게끔 (width는 조정해볼것)
     plot_result = True if DEBUG_MODE else False
+    bbox_center = True # True 시 bounding box의 정 중앙을 찾음, False시 activation의 가중 평균값을 찾음
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = "cpu"
 
@@ -71,7 +68,6 @@ def write_log(message: str):
 
     if DEBUG_MODE:
         print(line)
-
 
 def decode_base64_image(img_b64):
     try:
@@ -157,7 +153,7 @@ def main():
             result = infer_image_one(
                 model, clf, device, use_fp16,
                 image_np,
-                rotate_angle=1.3,
+                rotate_angle=CFG.rotate_angle,
                 plot_result=CFG.plot_result
             )
 
@@ -202,8 +198,12 @@ def infer_image_one(model, clf, device, use_fp16, test_image,
     lower_img = rotated[h // 2:, :]
 
     # --- upper / lower 각각 레이저 1개 검출 ---
-    upper_result = detect_single_laser(model, clf, device, use_fp16, upper_img)
-    lower_result = detect_single_laser(model, clf, device, use_fp16, lower_img)
+    upper_result = detect_single_laser(model, clf, device, use_fp16, upper_img, min_height=CFG.min_height)
+    lower_result = detect_single_laser(model, clf, device, use_fp16, lower_img, min_height=CFG.min_height)
+
+    # BOTTOM 에서 70% 이상 차이나면 그냥 .. 넘길까 ? 그게 괜찮을거 같기도하고 ..
+    # TOP은 어차피 80 이상만 해도 레이저가 잘 나와서 괜찮을거 같고 흠 ..
+
 
     upper_x, upper_vis = upper_result  # (x좌표, 시각화 넘파이)
     lower_x, lower_vis = lower_result
@@ -225,7 +225,7 @@ def infer_image_one(model, clf, device, use_fp16, test_image,
 
     return (upper_x, lower_x)
 
-def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
+def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=80):
     """
     입력: 상단 or 하단 이미지
     출력: (x좌표, 시각화 된 이미지)
@@ -262,7 +262,7 @@ def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
     fg_up = cv2.resize(fg_score_mf, (w, h), interpolation=cv2.INTER_CUBIC)
 
     # --- threshold ---
-    mask = (fg_up > 0.6).astype(np.uint8) * 255
+    mask = (fg_up > CFG.confidence).astype(np.uint8) * 255
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 9))
     mask_clean = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
@@ -281,17 +281,22 @@ def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
     if best_label == -1:
         return -1, img_np  # 실패
 
-    # --- 중심 구하기 ---
-    ys, xs = np.where(labels == best_label)
-    weights = fg_up[labels == best_label].astype(float)
-
-    cx = (xs * weights).sum() / weights.sum()
-    cy = (ys * weights).sum() / weights.sum()
-
     # --- 시각화 ---
     vis = img_np.copy()
     x0, y0, w0, h0 = stats[best_label, cv2.CC_STAT_LEFT], stats[best_label, cv2.CC_STAT_TOP], \
                      stats[best_label, cv2.CC_STAT_WIDTH], stats[best_label, cv2.CC_STAT_HEIGHT]
+
+    # --- 중심 구하기 ---
+    if CFG.bbox_center:
+        # --- 중심 구하기: Bounding Box의 기하학적 중앙 ---
+        cx = x0 + w0 / 2
+        cy = y0 + h0 / 2
+    else:
+        ys, xs = np.where(labels == best_label)
+        weights = fg_up[labels == best_label].astype(float)
+
+        cx = (xs * weights).sum() / weights.sum()
+        cy = (ys * weights).sum() / weights.sum()
 
     if h0 < min_height:
         # 이게 짧으면 오탐이 뜨고, 길면 실제 탐지되야 할 것 도 안됨.
@@ -302,6 +307,19 @@ def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=1):
     cv2.line(vis, (int(cx), y0), (int(cx), y0 + h0), (0, 0, 255), 2)
     cv2.circle(vis, (int(cx), int(cy)), 5, (0, 0, 255), -1)
 
+    # ============================
+    # 🔥 DEBUG 모드일 때만 heatmap 계산
+    # ============================
+    if CFG.plot_result:
+        heatmap = (fg_up * 255).astype(np.uint8)
+        heatmap_color = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+        # 원본 vis + heatmap overlay
+        overlay = cv2.addWeighted(vis, 0.85, heatmap_color, 0.15, 0)
+
+        return round(cx), overlay
+
+    # DEBUG off → heatmap 없이 기본 bbox만 반환
     return round(cx), vis
 
 
@@ -318,23 +336,50 @@ def resize_transform(img: Image, image_size: int = 768, patch_size: int = CFG.PA
 def visualize_upper_lower(rotated, upper_vis, lower_vis, upper_x, lower_x, dx_text, rotate_angle):
     h, w = rotated.shape[:2]
 
-    merged = rotated.copy()
+    merged_overlay = rotated.copy()
+    merged_overlay[:h//2, :] = upper_vis
+    merged_overlay[h//2:, :] = lower_vis
 
-    # upper 칸에 결과 덮기
-    merged[:h//2, :] = upper_vis
+    # RGB 변환
+    merged_overlay = cv2.cvtColor(merged_overlay, cv2.COLOR_BGR2RGB)
+    rotated_rgb = cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB)
 
-    # lower 칸에 결과 덮기
-    merged[h//2:, :] = lower_vis
     import matplotlib
     matplotlib.use("TkAgg")
 
-    cv2.putText(merged, f"difference x = {dx_text}", (50, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    fig = plt.figure(figsize=(12, 6))
 
-    plt.figure(figsize=(8, 8))
-    plt.title(f"rotate={rotate_angle}")
-    plt.imshow(merged)
-    plt.axis("off")
+    # 🔥 창 위치 고정 : 가로 중앙 + 세로 최상단
+    manager = plt.get_current_fig_manager()
+    window = manager.window
+    window.update_idletasks()
+
+    x = 300
+    y = 0
+    window.geometry(f"+{x}+{y}")
+
+    # --- subplot
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax1.imshow(rotated_rgb)
+    ax1.set_title(f"① 회전된 이미지 (rotate={rotate_angle}°)")
+    ax1.axis("off")
+
+    ax2 = fig.add_subplot(1, 2, 2)
+    ax2.imshow(merged_overlay)
+    ax2.set_title(f"② 레이저 검출 Overlay (Δx={dx_text})")
+    ax2.axis("off")
+
+    # --- Colorbar ---
+    cmap = matplotlib.colormaps.get_cmap("jet")
+    norm = matplotlib.colors.Normalize(vmin=0.0, vmax=1.0)
+
+    cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+    cb = plt.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax)
+    cb.set_label("Activation (0 ~ 1)")
+
+    cb.ax.hlines(f'{CFG.confidence}', 0, 1, colors="black", linewidth=2)
+    cb.ax.text(1.1, CFG.confidence, f'{CFG.confidence}', color="black", va="center", fontsize=8)
+
     plt.show(block=True)
 
 
