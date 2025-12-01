@@ -53,12 +53,13 @@ class CFG:
     plot_result = True if DEBUG_MODE else False
     bbox_center = True # True 시 bounding box의 정 중앙을 찾음, False시 activation의 가중 평균값을 찾음
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = "cpu"
-
+    
 def write_log(message: str):
+    # DEBUG 모드의 경우 print로도 띄움
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     os.makedirs(LOG_DIR, exist_ok=True)
-    log_path = os.path.join(LOG_DIR, f"{today}.log")
+
+    log_path = os.path.join(LOG_DIR, f"{today}_laser.log")
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {message}"
@@ -68,6 +69,9 @@ def write_log(message: str):
 
     if DEBUG_MODE:
         print(line)
+        
+    # log 파일 삭제는 ok_ng에서 진행함 - 365일만 남김
+
 
 def decode_base64_image(img_b64):
     try:
@@ -88,9 +92,9 @@ def model_load():
     model = model.eval().to(CFG.device)
     if use_fp16:
         model = model.half()
-        print("🚀 GPU + FP16 모드로 실행 중")
+        write_log("🚀 GPU + FP16 모드로 실행 중")
     else:
-        print("💻 CPU 모드로 실행 중 (FP32)")
+        write_log("💻 CPU 모드로 실행 중 (FP32)")
 
     try:
         dummy = torch.randn(1, 3, CFG.IMAGE_SIZE, CFG.IMAGE_SIZE, device=CFG.device)
@@ -98,9 +102,9 @@ def model_load():
             dummy = dummy.half()
         with torch.inference_mode():
             _ = model(dummy)
-        print("🔥 모델 warm-up 완료")
+        write_log("🔥 모델 warm-up 완료")
     except Exception as e:
-        print(f"⚠️ warm-up 중 오류 발생: {e}")
+        write_log(f"⚠️ warm-up 중 오류 발생: {e}")
 
     return model, clf, CFG.device, use_fp16
 
@@ -124,7 +128,7 @@ def main():
     socket = context.socket(zmq.REP)
     socket.bind(f"tcp://*:{PORT}")
 
-    print(f"✅ ZeroMQ 서버 대기 중... (tcp://*:{PORT})")
+    write_log(f"✅ ZMQ 서버 실행됨 (포트 {PORT})")
 
     while True:
         try:
@@ -137,7 +141,7 @@ def main():
             # [Frame 2] = image binary
             img_bytes = frames[1]
 
-            print(f"📩 요청 수신: file={file_name}")
+            write_log(f"📩 요청 수신: file={file_name}")
 
             # 🔥 2) 이미지 디코딩
             np_arr = np.frombuffer(img_bytes, dtype=np.uint8)
@@ -172,8 +176,8 @@ def main():
                 }))
 
         except Exception as e:
-            err_msg = f"{type(e).__name__}: {str(e)}"
-            print("❌ Error:", err_msg)
+            err_msg = f"Error: {type(e).__name__}: {str(e)}"
+            write_log(err_msg)
             traceback.print_exc()
             socket.send_string(json.dumps({"status": "ERROR", "msg": err_msg}))
 
@@ -201,23 +205,20 @@ def infer_image_one(model, clf, device, use_fp16, test_image,
     upper_result = detect_single_laser(model, clf, device, use_fp16, upper_img, min_height=CFG.min_height)
     lower_result = detect_single_laser(model, clf, device, use_fp16, lower_img, min_height=CFG.min_height)
 
-    # BOTTOM 에서 70% 이상 차이나면 그냥 .. 넘길까 ? 그게 괜찮을거 같기도하고 ..
-    # TOP은 어차피 80 이상만 해도 레이저가 잘 나와서 괜찮을거 같고 흠 ..
-
 
     upper_x, upper_vis = upper_result  # (x좌표, 시각화 넘파이)
     lower_x, lower_vis = lower_result
 
     # --- Δx 계산 ---
     if upper_x < 0 or lower_x < 0:
-        print("❌ 레이저 검출 실패 \n")
+        write_log("❌ 레이저 검출 실패 \n")
         return (-1, -1)
 
     dx = lower_x - upper_x
     dx_text = f"{int(dx)} px"
 
-    print(f"👉 upper_x: {upper_x}, lower_x: {lower_x}, Δx={dx_text}")
-    print(f"⏱ time: {time.time() - start_time:.3f}s")
+    write_log(f"👉 upper_x: {upper_x}, lower_x: {lower_x}, Δx={dx_text}")
+    write_log(f"⏱ time: {time.time() - start_time:.3f}s")
 
     # --- 시각화 ---
     if plot_result:
@@ -300,7 +301,7 @@ def detect_single_laser(model, clf, device, use_fp16, img_np, min_height=80):
 
     if h0 < min_height:
         # 이게 짧으면 오탐이 뜨고, 길면 실제 탐지되야 할 것 도 안됨.
-        print(f'탐지된 박스의 높이가 최소 높이보다 작은 상태입니다. 예측 높이: {h0} / 최소 높이: {min_height}')
+        write_log(f'탐지된 박스의 높이가 최소 높이보다 작은 상태입니다. 예측 높이: {h0} / 최소 높이: {min_height}')
         return -1, img_np
 
     cv2.rectangle(vis, (x0, y0), (x0 + w0, y0 + h0), (0, 255, 255), 2)

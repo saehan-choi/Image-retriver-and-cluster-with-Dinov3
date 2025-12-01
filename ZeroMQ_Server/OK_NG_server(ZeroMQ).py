@@ -21,7 +21,7 @@ PORT = 55551
 def write_log(message: str):
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     os.makedirs(LOG_DIR, exist_ok=True)
-    log_path = os.path.join(LOG_DIR, f"{today}.log")
+    log_path = os.path.join(LOG_DIR, f"{today}_okng.log")
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {message}"
@@ -32,7 +32,7 @@ def write_log(message: str):
     if DEBUG_MODE:
         print(line)
 
-    cleanup_logs(keep_last_n=2) # 최근 365개 파일만 남기고 다른건 삭제
+    cleanup_logs(keep_last_n=365) # 최근 365개 파일만 남기고 다른건 삭제
 
 def cleanup_logs(keep_last_n=5):
     """
@@ -54,7 +54,7 @@ def cleanup_logs(keep_last_n=5):
 
     # 오늘 로그 파일에 삭제 기록 남겨야 하니까 경로 준비
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    today_log_path = os.path.join(LOG_DIR, f"{today}.log")
+    today_log_path = os.path.join(LOG_DIR, f"{today}_okng.log")
 
     for f in files_to_delete:
         try:
@@ -131,7 +131,6 @@ model = None
 def init_model():
     global model
     try:
-        write_log("🔄 모델 초기화 중...")
         model = DinoLinearClassifier(num_classes=CFG.model_num_class).to(CFG.device)
         state_dict = torch.load(CFG.weights_path, map_location=CFG.device)
         fixed_state_dict = {k.replace("backbone.", "model."): v for k, v in state_dict.items()}
@@ -140,13 +139,16 @@ def init_model():
 
         if CFG.use_fp16 and CFG.device == "cuda":
             model.half()
+            write_log("🚀 GPU + FP16 모드로 실행 중")
+        else:
+            write_log("💻 CPU 모드로 실행 중 (FP32)")
 
         # 더미 테스트
         dummy = torch.randn(1, 3, *CFG.img_resize).to(CFG.device)
         if CFG.use_fp16 and CFG.device == "cuda":
             dummy = dummy.half()
         outputs = model(dummy)
-        write_log("✅ 모델 초기화 완료.")
+        write_log("🔥 모델 warm-up 완료")
         return True
     except Exception as e:
         write_log(f"❌ 모델 초기화 실패: {e}")
@@ -242,15 +244,15 @@ def run_server():
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind(f"tcp://*:{PORT}")
+    init_model()
 
     write_log(f"✅ ZMQ 서버 실행됨 (포트 {PORT})")
-    init_model()
 
     while True:
         try:
             # ✅ 여러 프레임(이미지) 수신 
             frames = socket.recv_multipart()  # 여러 프레임 받기
-            print(f"📩 받은 프레임 수: {len(frames)}")
+            write_log(f"📩 받은 프레임 수: {len(frames)}")
 
             # 요청 타입에 따라 단일 / 배치 구분
             result = execute_inference_batch(frames)
